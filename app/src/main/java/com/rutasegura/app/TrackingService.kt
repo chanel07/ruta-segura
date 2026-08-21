@@ -20,9 +20,7 @@ class TrackingService : Service() {
     companion object {
         private const val CHANNEL_ID = "ruta_tracking"
         private const val NOTIF_ID = 201
-        private const val INTERVAL_MS = 5000L
-        // Descarta posiciones con error mayor a esto (metros).
-        // El primer punto del GPS suele tener 100-500m de error: se ignora.
+        private const val INTERVAL_MS = 4000L
         private const val MAX_ACCURACY_METERS = 50f
     }
 
@@ -33,7 +31,6 @@ class TrackingService : Service() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             for (loc in result.locations) {
-                // Solo acepta posiciones con buena precisión.
                 if (loc.hasAccuracy() && loc.accuracy <= MAX_ACCURACY_METERS) {
                     RouteRepository.addPoint(loc.latitude, loc.longitude)
                 }
@@ -84,6 +81,11 @@ class TrackingService : Service() {
     private fun startLocationUpdates() {
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, INTERVAL_MS)
             .setMinUpdateIntervalMillis(INTERVAL_MS)
+            // Fuerza a reportar aunque no te muevas: sin esto el GPS se "duerme" quieto.
+            .setMinUpdateDistanceMeters(0f)
+            // Recibe actualización aunque no haya cambiado nada, cada intervalo.
+            .setWaitForAccurateLocation(false)
+            .setMaxUpdateDelayMillis(INTERVAL_MS)
             .build()
         try {
             fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
