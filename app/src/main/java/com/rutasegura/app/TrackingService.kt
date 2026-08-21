@@ -21,6 +21,9 @@ class TrackingService : Service() {
         private const val CHANNEL_ID = "ruta_tracking"
         private const val NOTIF_ID = 201
         private const val INTERVAL_MS = 5000L
+        // Descarta posiciones con error mayor a esto (metros).
+        // El primer punto del GPS suele tener 100-500m de error: se ignora.
+        private const val MAX_ACCURACY_METERS = 50f
     }
 
     private val fusedClient by lazy {
@@ -30,7 +33,10 @@ class TrackingService : Service() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             for (loc in result.locations) {
-                RouteRepository.addPoint(loc.latitude, loc.longitude)
+                // Solo acepta posiciones con buena precisión.
+                if (loc.hasAccuracy() && loc.accuracy <= MAX_ACCURACY_METERS) {
+                    RouteRepository.addPoint(loc.latitude, loc.longitude)
+                }
             }
         }
     }
