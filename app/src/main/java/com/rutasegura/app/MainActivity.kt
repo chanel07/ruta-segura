@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.CountDownTimer
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -85,8 +84,6 @@ private val TEXT_DIM = Color(0xFF8A96B4)
 
 class MainActivity : ComponentActivity() {
 
-    private var countdownTimer: CountDownTimer? = null
-    private val countdownLeft = mutableStateOf(30)
     private val pendingStart = mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
@@ -111,13 +108,9 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(state) {
                 when (state) {
-                    RouteRepository.AlertState.COUNTDOWN -> {
-                        wakeScreen(); startCountdownDisplay()
-                    }
+                    RouteRepository.AlertState.COUNTDOWN -> wakeScreen()
                     RouteRepository.AlertState.ALERTED -> wakeScreen()
-                    else -> {
-                        clearScreenFlags(); countdownTimer?.cancel()
-                    }
+                    else -> clearScreenFlags()
                 }
             }
 
@@ -283,7 +276,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun CountdownScreen() {
-        val left by countdownLeft
+        val left by RouteRepository.countdown.collectAsStateWithLifecycle()
 
         Column(
             modifier = Modifier.fillMaxSize()
@@ -316,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 icon = Icons.Rounded.Check,
                 colors = listOf(SUCCESS, Color(0xFF4FF0BC))
             ) {
-                countdownTimer?.cancel(); RouteRepository.cancelAlert()
+                RouteRepository.cancelAlert()
             }
         }
     }
@@ -411,15 +404,6 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(false); setTurnScreenOn(false)
         }
-    }
-
-    private fun startCountdownDisplay() {
-        countdownLeft.value = 30
-        countdownTimer?.cancel()
-        countdownTimer = object : CountDownTimer(30_000, 1000) {
-            override fun onTick(msLeft: Long) { countdownLeft.value = (msLeft / 1000).toInt() }
-            override fun onFinish() { }
-        }.start()
     }
 
     private fun callContact() {
