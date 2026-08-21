@@ -16,7 +16,7 @@ object RouteRepository {
     }
 
     private const val MOVE_THRESHOLD_METERS = 40.0
-    private const val STOP_TIME_MS = 1 * 60 * 1000L   // 1 min para probar
+    private const val STOP_TIME_MS = 1 * 60 * 1000L   // 1 min para probar (cambiar a 5 luego)
     private const val MAX_SPEED_MPS = 42.0
     private const val MIN_MOVE_METERS = 5.0
 
@@ -32,9 +32,14 @@ object RouteRepository {
     private val _contact = MutableStateFlow("")
     val contact: StateFlow<String> = _contact
 
-    // --- DIAGNÓSTICO (temporal) ---
     private val _debugInfo = MutableStateFlow("esperando GPS...")
     val debugInfo: StateFlow<String> = _debugInfo
+
+    // Segundos restantes de la cuenta regresiva (lo actualiza el servicio).
+    private val _countdown = MutableStateFlow(30)
+    val countdown: StateFlow<Int> = _countdown
+    fun setCountdown(seconds: Int) { _countdown.value = seconds }
+
     private var pointCount = 0
 
     private var refLat = 0.0
