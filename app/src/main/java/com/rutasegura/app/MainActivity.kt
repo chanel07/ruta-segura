@@ -13,6 +13,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -67,10 +68,46 @@ class MainActivity : ComponentActivity() {
 
     private fun render(state: RouteRepository.AlertState) {
         when (state) {
-            RouteRepository.AlertState.IDLE -> showIdle()
-            RouteRepository.AlertState.NORMAL -> showTracking()
-            RouteRepository.AlertState.COUNTDOWN -> showCountdown()
-            RouteRepository.AlertState.ALERTED -> showAlerted()
+            RouteRepository.AlertState.IDLE -> {
+                clearScreenFlags()
+                showIdle()
+            }
+            RouteRepository.AlertState.NORMAL -> {
+                clearScreenFlags()
+                showTracking()
+            }
+            RouteRepository.AlertState.COUNTDOWN -> {
+                wakeScreen()
+                showCountdown()
+            }
+            RouteRepository.AlertState.ALERTED -> {
+                wakeScreen()
+                showAlerted()
+            }
+        }
+    }
+
+    // Enciende y desbloquea la pantalla para mostrar la alerta.
+    private fun wakeScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun clearScreenFlags() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
         }
     }
 
@@ -252,8 +289,8 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            val ringtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            val ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
             ringtone?.play()
         } catch (e: Exception) {
             // sin sonido, ignorar
