@@ -30,6 +30,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 
 class MainActivity : ComponentActivity() {
@@ -49,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private var ringtone: Ringtone? = null
 
     private var mapView: MapView? = null
+    private var firstCenter = true
 
     private val COUNTDOWN_SECONDS = 30L
 
@@ -58,15 +60,12 @@ class MainActivity : ComponentActivity() {
         val granted =
             results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (granted && pendingStart) {
-            startTracking()
-        }
+        if (granted && pendingStart) startTracking()
         pendingStart = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // osmdroid necesita esta configuración antes de usar el mapa.
         Configuration.getInstance().load(
             applicationContext,
             getSharedPreferences("osmdroid", MODE_PRIVATE)
@@ -86,9 +85,7 @@ class MainActivity : ComponentActivity() {
 
     private fun observeState() {
         lifecycleScope.launch {
-            RouteRepository.alertState.collect { state ->
-                render(state)
-            }
+            RouteRepository.alertState.collect { state -> render(state) }
         }
     }
 
@@ -122,10 +119,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Inicial ----------
-
     private fun showIdle() {
-        countdownTimer?.cancel(); stopAlarmSignal(); mapView = null
+        countdownTimer?.cancel(); stopAlarmSignal(); mapView = null; firstCenter = true
         rootLayout.removeAllViews()
         rootLayout.setPadding(56, 72, 56, 56)
 
@@ -162,14 +157,11 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(startBtn)
     }
 
-    // ---------- Recorrido con mapa ----------
-
     private fun showTracking() {
-        countdownTimer?.cancel(); stopAlarmSignal()
+        countdownTimer?.cancel(); stopAlarmSignal(); firstCenter = true
         rootLayout.removeAllViews()
         rootLayout.setPadding(0, 0, 0, 0)
 
-        // Barra superior compacta
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -185,10 +177,12 @@ class MainActivity : ComponentActivity() {
         topBar.addView(statusLine)
         rootLayout.addView(topBar, fullWidth())
 
-        // Mapa que ocupa el espacio central
         val map = MapView(this).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
+            // Límites de zoom: dentro del rango donde OSM tiene imágenes.
+            minZoomLevel = 12.0
+            maxZoomLevel = 19.0
             controller.setZoom(17.0)
         }
         mapView = map
@@ -197,7 +191,6 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         )
 
-        // Barra inferior con botones
         val bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -208,18 +201,15 @@ class MainActivity : ComponentActivity() {
             RouteRepository.manualSos()
         }
         bottomBar.addView(sosBtn)
-        val spacer = View(this)
-        spacer.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 16)
-        bottomBar.addView(spacer)
+        val sp = View(this)
+        sp.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 16)
+        bottomBar.addView(sp)
         val stopBtn = ghostButton("Detener recorrido") { stopTracking() }
         bottomBar.addView(stopBtn)
         rootLayout.addView(bottomBar, fullWidth())
 
-        // Dibuja el recorrido en vivo
         lifecycleScope.launch {
-            RouteRepository.points.collect { pts ->
-                updateMap(pts)
-            }
+            RouteRepository.points.collect { pts -> updateMap(pts) }
         }
     }
 
@@ -234,18 +224,23 @@ class MainActivity : ComponentActivity() {
             outlinePaint.color = COLOR_PRIMARY
             outlinePaint.strokeWidth = 12f
         }
-        for (p in points) {
-            line.addPoint(GeoPoint(p.lat, p.lng))
-        }
+        for (p in points) line.addPoint(GeoPoint(p.lat, p.lng))
         map.overlays.add(line)
 
-        // Centra en el último punto
+        // Marcador de posición actual
         val last = points.last()
-        map.controller.setCenter(GeoPoint(last.lat, last.lng))
+        val here = GeoPoint(last.lat, last.lng)
+        val marker = Marker(map).apply {
+            position = here
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Aquí estás"
+        }
+        map.overlays.add(marker)
+
+        // Centra solo la primera vez (o siempre en el último punto).
+        map.controller.setCenter(here)
         map.invalidate()
     }
-
-    // ---------- Cuenta regresiva ----------
 
     private fun showCountdown() {
         mapView = null
@@ -280,8 +275,6 @@ class MainActivity : ComponentActivity() {
             override fun onFinish() { stopAlarmSignal(); RouteRepository.triggerAlert() }
         }.start()
     }
-
-    // ---------- Alerta ----------
 
     private fun showAlerted() {
         countdownTimer?.cancel(); stopAlarmSignal(); mapView = null
@@ -371,9 +364,8 @@ class MainActivity : ComponentActivity() {
         val missing = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) {
-            startTracking()
-        } else {
+        if (missing.isEmpty()) startTracking()
+        else {
             pendingStart = true
             permissionLauncher.launch(missing.toTypedArray())
         }
