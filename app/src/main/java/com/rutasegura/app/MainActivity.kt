@@ -4,14 +4,20 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -23,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var rootLayout: LinearLayout
     private var pendingStart = false
     private var countdownTimer: CountDownTimer? = null
+    private var vibrator: Vibrator? = null
 
     private val COUNTDOWN_SECONDS = 30L
 
@@ -40,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        vibrator = getSystemService(Vibrator::class.java)
         rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -66,26 +74,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Pantalla inicial ----------
+    // ---------- Pantalla inicial con contacto ----------
 
     private fun showIdle() {
         countdownTimer?.cancel()
+        stopVibration()
         rootLayout.removeAllViews()
 
         addTitle("Ruta Segura")
-        addText("Presiona iniciar cuando salgas.\nLa app te acompaña en el camino.", 16f)
-        addSpacer(40)
+        addText("Guarda el número de tu contacto de confianza (con código de país, ej: 57300...).", 15f)
+        addSpacer(16)
+
+        val contactField = EditText(this).apply {
+            hint = "Ej: 573001234567"
+            setText(RouteRepository.contact.value)
+            textSize = 18f
+            gravity = Gravity.CENTER
+        }
+        rootLayout.addView(contactField)
+        addSpacer(32)
 
         val startBtn = bigButton("INICIAR RECORRIDO", "#1B5E20") {
-            requestPermissionsAndStart()
+            val number = contactField.text.toString().trim()
+            if (number.length < 10) {
+                Toast.makeText(this, "Escribe un número válido con código de país", Toast.LENGTH_LONG).show()
+            } else {
+                RouteRepository.setContact(number)
+                requestPermissionsAndStart()
+            }
         }
         rootLayout.addView(startBtn)
     }
 
-    // ---------- Pantalla recorrido normal ----------
+    // ---------- Recorrido normal ----------
 
     private fun showTracking() {
         countdownTimer?.cancel()
+        stopVibration()
         rootLayout.removeAllViews()
 
         addTitle("En recorrido")
@@ -118,7 +143,7 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(stopBtn)
     }
 
-    // ---------- Cuenta regresiva "¿estás bien?" ----------
+    // ---------- Cuenta regresiva con sonido y vibración ----------
 
     private fun showCountdown() {
         rootLayout.removeAllViews()
@@ -138,9 +163,12 @@ class MainActivity : ComponentActivity() {
         addSpacer(32)
 
         val okBtn = bigButton("ESTOY BIEN", "#1B5E20") {
+            stopVibration()
             RouteRepository.cancelAlert()
         }
         rootLayout.addView(okBtn)
+
+        startAlarmSignal()
 
         countdownTimer?.cancel()
         countdownTimer = object : CountDownTimer(COUNTDOWN_SECONDS * 1000, 1000) {
@@ -148,41 +176,96 @@ class MainActivity : ComponentActivity() {
                 counter.text = (msLeft / 1000).toString()
             }
             override fun onFinish() {
+                stopVibration()
                 RouteRepository.triggerAlert()
             }
         }.start()
     }
 
-    // ---------- Alerta disparada (Fase 2: solo simulada) ----------
+    // ---------- Alerta disparada: envío semi-automático ----------
 
     private fun showAlerted() {
         countdownTimer?.cancel()
+        stopVibration()
         rootLayout.removeAllViews()
 
         addTitle("⚠ ALERTA")
-        val banner = TextView(this).apply {
-            text = "Aquí se habría enviado la alerta\na tu contacto de confianza.\n\n" +
-                    "(En la siguiente fase se envía de verdad.)"
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#B00020"))
-            setPadding(0, 24, 0, 24)
-        }
-        rootLayout.addView(banner)
-
+        addText("Se activó una alerta de emergencia.\nEnvía tu ubicación a tu contacto.", 16f)
         addSpacer(32)
 
-        val backBtn = bigButton("VOLVER AL RECORRIDO", "#1B5E20") {
+        val sendBtn = bigButton("ENVIAR ALERTA POR WHATSAPP", "#B00020") {
+            sendWhatsAppAlert()
+        }
+        rootLayout.addView(sendBtn)
+
+        addSpacer(20)
+
+        val backBtn = smallButton("Estoy bien, volver al recorrido") {
             RouteRepository.cancelAlert()
         }
         rootLayout.addView(backBtn)
 
-        addSpacer(16)
+        addSpacer(12)
 
         val stopBtn = smallButton("Detener recorrido") {
             stopTracking()
         }
         rootLayout.addView(stopBtn)
+    }
+
+    private fun sendWhatsAppAlert() {
+        val number = RouteRepository.contact.value
+        val last = RouteRepository.lastPoint()
+
+        val locationText = if (last != null) {
+            "Mi ubicación: https://maps.google.com/?q=${last.lat},${last.lng}"
+        } else {
+            "No se pudo obtener mi ubicación exacta."
+        }
+
+        val message = "🚨 EMERGENCIA - Ruta Segura 🚨\n" +
+                "Necesito ayuda. Esta es mi última ubicación conocida:\n$locationText"
+
+        val url = "https://wa.me/$number?text=${Uri.encode(message)}"
+
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "No se pudo abrir WhatsApp", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ---------- Sonido + vibración ----------
+
+    private fun startAlarmSignal() {
+        try {
+            val pattern = longArrayOf(0, 600, 400, 600, 400)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(pattern, 0)
+            }
+        } catch (e: Exception) {
+            // sin vibrador, ignorar
+        }
+
+        try {
+            val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            val ringtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
+            ringtone?.play()
+        } catch (e: Exception) {
+            // sin sonido, ignorar
+        }
+    }
+
+    private fun stopVibration() {
+        try {
+            vibrator?.cancel()
+        } catch (e: Exception) {
+            // ignorar
+        }
     }
 
     // ---------- Permisos y servicio ----------
