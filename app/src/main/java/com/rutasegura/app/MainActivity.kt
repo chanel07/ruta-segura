@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,7 +45,6 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 
-// Paleta oscura elegante
 private val BG = Color(0xFF0A0E1A)
 private val SURFACE = Color(0xFF141A2E)
 private val SURFACE_HI = Color(0xFF1E2743)
@@ -64,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private var countdownTimer: CountDownTimer? = null
 
     private val countdownLeft = mutableStateOf(30)
+    private val pendingStart = mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -74,8 +73,6 @@ class MainActivity : ComponentActivity() {
         if (granted && pendingStart.value) startTracking()
         pendingStart.value = false
     }
-
-    private val pendingStart = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,8 +115,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    // ---------- Pantalla inicial ----------
 
     @Composable
     private fun IdleScreen() {
@@ -177,9 +172,7 @@ class MainActivity : ComponentActivity() {
                 icon = Icons.Rounded.PlayArrow,
                 colors = listOf(ACCENT, ACCENT_GLOW)
             ) {
-                if (contact.trim().length < 10) {
-                    // sin toast en compose simple: no arranca
-                } else {
+                if (contact.trim().length >= 10) {
                     RouteRepository.setContact(contact.trim())
                     requestPermissionsAndStart()
                 }
@@ -187,26 +180,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Recorrido con mapa ----------
-
     @Composable
     private fun TrackingScreen() {
         val points by RouteRepository.points.collectAsStateWithLifecycle()
+        val debug by RouteRepository.debugInfo.collectAsStateWithLifecycle()
 
         Column(Modifier.fillMaxSize().background(BG)) {
-            // Barra superior
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(SUCCESS))
-                Spacer(Modifier.width(8.dp))
-                Text("En recorrido", color = SUCCESS, fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(SUCCESS))
+                    Spacer(Modifier.width(8.dp))
+                    Text("En recorrido", color = SUCCESS, fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold)
+                }
+                Text(debug, color = TEXT_DIM, fontSize = 12.sp)
             }
 
-            // Mapa
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 AndroidView(
                     factory = { ctx ->
@@ -241,7 +233,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // Barra inferior
             Column(Modifier.fillMaxWidth().padding(24.dp)) {
                 GradientButton(
                     text = "SOS — Pedir ayuda",
@@ -253,8 +244,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    // ---------- Cuenta regresiva ----------
 
     @Composable
     private fun CountdownScreen() {
@@ -294,8 +283,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Alerta ----------
-
     @Composable
     private fun AlertedScreen() {
         Column(
@@ -330,8 +317,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Componentes reutilizables ----------
-
     @Composable
     private fun GradientButton(
         text: String,
@@ -360,8 +345,6 @@ class MainActivity : ComponentActivity() {
             Text(text, color = TEXT_DIM, fontSize = 15.sp)
         }
     }
-
-    // ---------- Lógica (sin cambios) ----------
 
     private fun wakeScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
