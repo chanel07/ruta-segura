@@ -11,17 +11,12 @@ object RouteRepository {
         val time: Long
     )
 
-    // Estados posibles del monitoreo.
     enum class AlertState {
-        IDLE,        // no hay recorrido activo
-        NORMAL,      // moviéndose normal
-        COUNTDOWN,   // detectó algo raro, cuenta regresiva "¿estás bien?"
-        ALERTED      // no se canceló: se dispararía la alerta
+        IDLE, NORMAL, COUNTDOWN, ALERTED
     }
 
-    // --- Parámetros de detección (Fase 2) ---
-    private const val STOP_RADIUS_METERS = 30.0      // dentro de esto = "no se movió"
-    private const val STOP_TIME_MS = 5 * 60 * 1000L  // 5 minutos detenido
+    private const val STOP_RADIUS_METERS = 30.0
+    private const val STOP_TIME_MS = 5 * 60 * 1000L
 
     private val _points = MutableStateFlow<List<Point>>(emptyList())
     val points: StateFlow<List<Point>> = _points
@@ -32,18 +27,26 @@ object RouteRepository {
     private val _alertState = MutableStateFlow(AlertState.IDLE)
     val alertState: StateFlow<AlertState> = _alertState
 
-    // Ancla: el punto donde la persona "se quedó quieta".
+    // Contacto de confianza (número en formato internacional, ej: 57300...).
+    private val _contact = MutableStateFlow("")
+    val contact: StateFlow<String> = _contact
+
     private var anchorLat = 0.0
     private var anchorLng = 0.0
     private var anchorTime = 0L
     private var hasAnchor = false
+
+    fun setContact(number: String) {
+        _contact.value = number
+    }
+
+    fun lastPoint(): Point? = _points.value.lastOrNull()
 
     @Synchronized
     fun addPoint(lat: Double, lng: Double) {
         val now = System.currentTimeMillis()
         _points.value = _points.value + Point(lat, lng, now)
 
-        // Si estamos en cuenta regresiva o ya alertado, no re-evaluar movimiento.
         if (_alertState.value == AlertState.COUNTDOWN ||
             _alertState.value == AlertState.ALERTED) {
             return
@@ -56,11 +59,9 @@ object RouteRepository {
 
         val dist = distanceMeters(anchorLat, anchorLng, lat, lng)
         if (dist > STOP_RADIUS_METERS) {
-            // Se movió: reinicia el ancla, todo normal.
             setAnchor(lat, lng, now)
             _alertState.value = AlertState.NORMAL
         } else {
-            // Sigue cerca del ancla: ¿cuánto tiempo lleva quieto?
             if (now - anchorTime >= STOP_TIME_MS) {
                 _alertState.value = AlertState.COUNTDOWN
             }
@@ -74,20 +75,17 @@ object RouteRepository {
         hasAnchor = true
     }
 
-    /** La persona confirmó que está bien: vuelve a normal. */
     @Synchronized
     fun cancelAlert() {
         _alertState.value = AlertState.NORMAL
-        anchorTime = System.currentTimeMillis()  // reinicia el reloj de quietud
+        anchorTime = System.currentTimeMillis()
     }
 
-    /** No se canceló la cuenta regresiva: se dispara la alerta. */
     @Synchronized
     fun triggerAlert() {
         _alertState.value = AlertState.ALERTED
     }
 
-    /** SOS manual: salta directo a alerta. */
     @Synchronized
     fun manualSos() {
         _alertState.value = AlertState.ALERTED
@@ -108,7 +106,6 @@ object RouteRepository {
         hasAnchor = false
     }
 
-    // Distancia entre dos coordenadas en metros (fórmula de Haversine).
     private fun distanceMeters(
         lat1: Double, lng1: Double,
         lat2: Double, lng2: Double
