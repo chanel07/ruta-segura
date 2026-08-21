@@ -26,24 +26,29 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Polyline
 
 class MainActivity : ComponentActivity() {
 
-    // Paleta
-    private val COLOR_BG = Color.parseColor("#0D1B2A")        // azul muy oscuro (fondo)
-    private val COLOR_CARD = Color.parseColor("#1B263B")      // azul oscuro (tarjetas)
-    private val COLOR_PRIMARY = Color.parseColor("#2E5EAA")   // azul principal
-    private val COLOR_PRIMARY_D = Color.parseColor("#1B3A6B") // azul oscuro botón
-    private val COLOR_DANGER = Color.parseColor("#C1121F")    // rojo SOS/alerta
-    private val COLOR_SUCCESS = Color.parseColor("#2A9D8F")   // verde "estoy bien"
-    private val COLOR_TEXT = Color.parseColor("#E0E6ED")      // texto claro
-    private val COLOR_TEXT_DIM = Color.parseColor("#9DB2CE")  // texto tenue
+    private val COLOR_BG = Color.parseColor("#0D1B2A")
+    private val COLOR_CARD = Color.parseColor("#1B263B")
+    private val COLOR_PRIMARY = Color.parseColor("#2E5EAA")
+    private val COLOR_DANGER = Color.parseColor("#C1121F")
+    private val COLOR_SUCCESS = Color.parseColor("#2A9D8F")
+    private val COLOR_TEXT = Color.parseColor("#E0E6ED")
+    private val COLOR_TEXT_DIM = Color.parseColor("#9DB2CE")
 
     private lateinit var rootLayout: LinearLayout
     private var pendingStart = false
     private var countdownTimer: CountDownTimer? = null
     private var vibrator: Vibrator? = null
     private var ringtone: Ringtone? = null
+
+    private var mapView: MapView? = null
 
     private val COUNTDOWN_SECONDS = 30L
 
@@ -61,6 +66,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // osmdroid necesita esta configuración antes de usar el mapa.
+        Configuration.getInstance().load(
+            applicationContext,
+            getSharedPreferences("osmdroid", MODE_PRIVATE)
+        )
+        Configuration.getInstance().userAgentValue = packageName
+
         vibrator = getSystemService(Vibrator::class.java)
         rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -82,25 +94,16 @@ class MainActivity : ComponentActivity() {
 
     private fun render(state: RouteRepository.AlertState) {
         when (state) {
-            RouteRepository.AlertState.IDLE -> {
-                clearScreenFlags(); showIdle()
-            }
-            RouteRepository.AlertState.NORMAL -> {
-                clearScreenFlags(); showTracking()
-            }
-            RouteRepository.AlertState.COUNTDOWN -> {
-                wakeScreen(); showCountdown()
-            }
-            RouteRepository.AlertState.ALERTED -> {
-                wakeScreen(); showAlerted()
-            }
+            RouteRepository.AlertState.IDLE -> { clearScreenFlags(); showIdle() }
+            RouteRepository.AlertState.NORMAL -> { clearScreenFlags(); showTracking() }
+            RouteRepository.AlertState.COUNTDOWN -> { wakeScreen(); showCountdown() }
+            RouteRepository.AlertState.ALERTED -> { wakeScreen(); showAlerted() }
         }
     }
 
     private fun wakeScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
+            setShowWhenLocked(true); setTurnScreenOn(true)
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(
@@ -115,17 +118,16 @@ class MainActivity : ComponentActivity() {
     private fun clearScreenFlags() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(false)
-            setTurnScreenOn(false)
+            setShowWhenLocked(false); setTurnScreenOn(false)
         }
     }
 
-    // ---------- Pantalla inicial ----------
+    // ---------- Inicial ----------
 
     private fun showIdle() {
-        countdownTimer?.cancel()
-        stopAlarmSignal()
+        countdownTimer?.cancel(); stopAlarmSignal(); mapView = null
         rootLayout.removeAllViews()
+        rootLayout.setPadding(56, 72, 56, 56)
 
         addLogo()
         addTitle("Ruta Segura")
@@ -160,49 +162,95 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(startBtn)
     }
 
-    // ---------- Recorrido normal ----------
+    // ---------- Recorrido con mapa ----------
 
     private fun showTracking() {
-        countdownTimer?.cancel()
-        stopAlarmSignal()
+        countdownTimer?.cancel(); stopAlarmSignal()
         rootLayout.removeAllViews()
+        rootLayout.setPadding(0, 0, 0, 0)
 
-        addStatusDot(COLOR_SUCCESS)
-        addTitle("En recorrido")
-        addText("La app está cuidando tu trayecto", 15f, COLOR_TEXT_DIM)
-        addSpacer(16)
-
-        val pointsView = TextView(this).apply {
-            textSize = 14f
+        // Barra superior compacta
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setTextColor(COLOR_TEXT_DIM)
+            setBackgroundColor(COLOR_BG)
+            setPadding(32, 40, 32, 24)
         }
-        rootLayout.addView(pointsView)
-        lifecycleScope.launch {
-            RouteRepository.points.collect { pts ->
-                pointsView.text = "Ubicaciones registradas: ${pts.size}"
-            }
+        val statusLine = TextView(this).apply {
+            text = "● En recorrido"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_SUCCESS)
         }
+        topBar.addView(statusLine)
+        rootLayout.addView(topBar, fullWidth())
 
-        addSpacer(56)
+        // Mapa que ocupa el espacio central
+        val map = MapView(this).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            controller.setZoom(17.0)
+        }
+        mapView = map
+        rootLayout.addView(
+            map,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
 
+        // Barra inferior con botones
+        val bottomBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(COLOR_BG)
+            setPadding(48, 24, 48, 40)
+        }
         val sosBtn = styledButton("SOS — PEDIR AYUDA", COLOR_DANGER) {
             RouteRepository.manualSos()
         }
-        rootLayout.addView(sosBtn)
+        bottomBar.addView(sosBtn)
+        val spacer = View(this)
+        spacer.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 16)
+        bottomBar.addView(spacer)
+        val stopBtn = ghostButton("Detener recorrido") { stopTracking() }
+        bottomBar.addView(stopBtn)
+        rootLayout.addView(bottomBar, fullWidth())
 
-        addSpacer(20)
-
-        val stopBtn = ghostButton("Detener recorrido") {
-            stopTracking()
+        // Dibuja el recorrido en vivo
+        lifecycleScope.launch {
+            RouteRepository.points.collect { pts ->
+                updateMap(pts)
+            }
         }
-        rootLayout.addView(stopBtn)
+    }
+
+    private fun updateMap(points: List<RouteRepository.Point>) {
+        val map = mapView ?: return
+        if (points.isEmpty()) return
+
+        map.overlays.clear()
+
+        // Línea del recorrido
+        val line = Polyline().apply {
+            outlinePaint.color = COLOR_PRIMARY
+            outlinePaint.strokeWidth = 12f
+        }
+        for (p in points) {
+            line.addPoint(GeoPoint(p.lat, p.lng))
+        }
+        map.overlays.add(line)
+
+        // Centra en el último punto
+        val last = points.last()
+        map.controller.setCenter(GeoPoint(last.lat, last.lng))
+        map.invalidate()
     }
 
     // ---------- Cuenta regresiva ----------
 
     private fun showCountdown() {
+        mapView = null
         rootLayout.removeAllViews()
+        rootLayout.setPadding(56, 72, 56, 56)
 
         addTitle("¿Estás bien?")
         addText("Llevas un rato sin moverte", 16f, COLOR_TEXT_DIM)
@@ -215,7 +263,6 @@ class MainActivity : ComponentActivity() {
         }
         rootLayout.addView(counter)
         addSpacer(8)
-
         addText("Si no respondes, se enviará una alerta", 14f, COLOR_TEXT_DIM)
         addSpacer(40)
 
@@ -229,49 +276,33 @@ class MainActivity : ComponentActivity() {
 
         countdownTimer?.cancel()
         countdownTimer = object : CountDownTimer(COUNTDOWN_SECONDS * 1000, 1000) {
-            override fun onTick(msLeft: Long) {
-                counter.text = (msLeft / 1000).toString()
-            }
-            override fun onFinish() {
-                stopAlarmSignal()
-                RouteRepository.triggerAlert()
-            }
+            override fun onTick(msLeft: Long) { counter.text = (msLeft / 1000).toString() }
+            override fun onFinish() { stopAlarmSignal(); RouteRepository.triggerAlert() }
         }.start()
     }
 
     // ---------- Alerta ----------
 
     private fun showAlerted() {
-        countdownTimer?.cancel()
-        stopAlarmSignal()
+        countdownTimer?.cancel(); stopAlarmSignal(); mapView = null
         rootLayout.removeAllViews()
+        rootLayout.setPadding(56, 72, 56, 56)
 
         addText("⚠", 56f, COLOR_DANGER)
         addTitle("Alerta activada")
         addText("Avisa a tu contacto de confianza", 15f, COLOR_TEXT_DIM)
         addSpacer(40)
 
-        val callBtn = styledButton("LLAMAR AL CONTACTO", COLOR_DANGER) {
-            callContact()
-        }
+        val callBtn = styledButton("LLAMAR AL CONTACTO", COLOR_DANGER) { callContact() }
         rootLayout.addView(callBtn)
         addSpacer(16)
-
-        val sendBtn = styledButton("ENVIAR UBICACIÓN", COLOR_PRIMARY) {
-            sendWhatsAppAlert()
-        }
+        val sendBtn = styledButton("ENVIAR UBICACIÓN", COLOR_PRIMARY) { sendWhatsAppAlert() }
         rootLayout.addView(sendBtn)
         addSpacer(24)
-
-        val backBtn = ghostButton("Estoy bien, volver") {
-            RouteRepository.cancelAlert()
-        }
+        val backBtn = ghostButton("Estoy bien, volver") { RouteRepository.cancelAlert() }
         rootLayout.addView(backBtn)
         addSpacer(8)
-
-        val stopBtn = ghostButton("Detener recorrido") {
-            stopTracking()
-        }
+        val stopBtn = ghostButton("Detener recorrido") { stopTracking() }
         rootLayout.addView(stopBtn)
     }
 
@@ -282,8 +313,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         try {
-            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
         } catch (e: Exception) {
             Toast.makeText(this, "No se pudo abrir el marcador", Toast.LENGTH_LONG).show()
         }
@@ -292,26 +322,20 @@ class MainActivity : ComponentActivity() {
     private fun sendWhatsAppAlert() {
         val number = RouteRepository.contact.value
         val last = RouteRepository.lastPoint()
-
         val locationText = if (last != null) {
             "Mi ubicación: https://maps.google.com/?q=${last.lat},${last.lng}"
         } else {
             "No se pudo obtener mi ubicación exacta."
         }
-
         val message = "🚨 EMERGENCIA - Ruta Segura 🚨\n" +
                 "Necesito ayuda. Esta es mi última ubicación conocida:\n$locationText"
-
         val url = "https://wa.me/$number?text=${Uri.encode(message)}"
-
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
             Toast.makeText(this, "No se pudo abrir WhatsApp", Toast.LENGTH_LONG).show()
         }
     }
-
-    // ---------- Sonido + vibración ----------
 
     private fun startAlarmSignal() {
         try {
@@ -323,7 +347,6 @@ class MainActivity : ComponentActivity() {
                 vibrator?.vibrate(pattern, 0)
             }
         } catch (e: Exception) { }
-
         try {
             ringtone?.stop()
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -336,8 +359,6 @@ class MainActivity : ComponentActivity() {
         try { vibrator?.cancel() } catch (e: Exception) { }
         try { ringtone?.stop() } catch (e: Exception) { }
     }
-
-    // ---------- Permisos y servicio ----------
 
     private fun requestPermissionsAndStart() {
         val needed = mutableListOf(
@@ -366,55 +387,31 @@ class MainActivity : ComponentActivity() {
         stopService(Intent(this, TrackingService::class.java))
     }
 
-    // ---------- Componentes UI ----------
-
     private fun addLogo() {
         val logo = TextView(this).apply {
-            text = "🛡"
-            textSize = 56f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 8)
+            text = "🛡"; textSize = 56f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 8)
         }
         rootLayout.addView(logo)
     }
 
     private fun addTitle(text: String) {
         val t = TextView(this).apply {
-            this.text = text
-            textSize = 32f
-            gravity = Gravity.CENTER
-            setTextColor(COLOR_TEXT)
-            setPadding(0, 0, 0, 8)
+            this.text = text; textSize = 32f; gravity = Gravity.CENTER
+            setTextColor(COLOR_TEXT); setPadding(0, 0, 0, 8)
         }
         rootLayout.addView(t)
     }
 
     private fun addText(text: String, size: Float, color: Int) {
         val t = TextView(this).apply {
-            this.text = text
-            textSize = size
-            gravity = Gravity.CENTER
-            setTextColor(color)
+            this.text = text; textSize = size; gravity = Gravity.CENTER; setTextColor(color)
         }
         rootLayout.addView(t)
     }
 
-    private fun addStatusDot(color: Int) {
-        val dot = TextView(this).apply {
-            text = "●"
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(color)
-            setPadding(0, 0, 0, 8)
-        }
-        rootLayout.addView(dot)
-    }
-
     private fun addSpacer(height: Int) {
         val s = View(this)
-        s.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, height
-        )
+        s.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height)
         rootLayout.addView(s)
     }
 
@@ -426,37 +423,24 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun roundedBg(color: Int, radius: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = radius.toFloat()
-        }
+        return GradientDrawable().apply { setColor(color); cornerRadius = radius.toFloat() }
     }
 
     private fun styledButton(label: String, color: Int, onClick: () -> Unit): Button {
         val b = Button(this).apply {
-            text = label
-            textSize = 18f
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            background = roundedBg(color, 32)
+            text = label; textSize = 18f; isAllCaps = false
+            setTextColor(Color.WHITE); background = roundedBg(color, 32)
             stateListAnimator = null
             setOnClickListener { onClick() }
         }
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 170
-        )
-        params.setMargins(0, 0, 0, 0)
-        b.layoutParams = params
+        b.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 170)
         return b
     }
 
     private fun ghostButton(label: String, onClick: () -> Unit): Button {
         val b = Button(this).apply {
-            text = label
-            textSize = 15f
-            isAllCaps = false
-            setTextColor(COLOR_TEXT_DIM)
-            background = null
+            text = label; textSize = 15f; isAllCaps = false
+            setTextColor(COLOR_TEXT_DIM); background = null
             setOnClickListener { onClick() }
         }
         return b
