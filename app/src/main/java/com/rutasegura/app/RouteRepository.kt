@@ -35,7 +35,6 @@ object RouteRepository {
     private val _debugInfo = MutableStateFlow("esperando GPS...")
     val debugInfo: StateFlow<String> = _debugInfo
 
-    // Segundos restantes de la cuenta regresiva (lo actualiza el servicio).
     private val _countdown = MutableStateFlow(30)
     val countdown: StateFlow<Int> = _countdown
     fun setCountdown(seconds: Int) { _countdown.value = seconds }
@@ -104,6 +103,7 @@ object RouteRepository {
             }
         } else {
             if (now - refTime >= STOP_TIME_MS) {
+                _countdown.value = 30        // inicializa ANTES de cambiar estado
                 _alertState.value = AlertState.COUNTDOWN
             }
         }
@@ -120,7 +120,10 @@ object RouteRepository {
     fun triggerAlert() { _alertState.value = AlertState.ALERTED }
 
     @Synchronized
-    fun manualSos() { _alertState.value = AlertState.ALERTED }
+    fun manualSos() {
+        _countdown.value = 30
+        _alertState.value = AlertState.COUNTDOWN   // SOS ahora también pasa por cuenta regresiva
+    }
 
     @Synchronized
     fun start() {
