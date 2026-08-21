@@ -15,14 +15,13 @@ object RouteRepository {
         IDLE, NORMAL, COUNTDOWN, ALERTED
     }
 
-    private const val STOP_RADIUS_METERS = 30.0
+    // Si te alejas más de esto del punto de referencia, cuenta como "te moviste".
+    private const val MOVE_THRESHOLD_METERS = 40.0
+    // Tiempo quieto (dentro del radio) para disparar la alerta.
     private const val STOP_TIME_MS = 5 * 60 * 1000L
-
-    // --- Filtro de calidad GPS ---
-    // Descarta saltos imposibles: si un punto implica velocidad mayor a esto,
-    // es un error del GPS, no un movimiento real (150 km/h caminando/moto = imposible).
-    private const val MAX_SPEED_MPS = 42.0   // ~150 km/h
-    // Ignora micro-movimientos menores a esto (ruido del GPS estando quieto).
+    // Salto imposible = error GPS.
+    private const val MAX_SPEED_MPS = 42.0
+    // Micro-movimiento: no ensucia la línea del mapa.
     private const val MIN_MOVE_METERS = 5.0
 
     private val _points = MutableStateFlow<List<Point>>(emptyList())
@@ -37,10 +36,17 @@ object RouteRepository {
     private val _contact = MutableStateFlow("")
     val contact: StateFlow<String> = _contact
 
-    private var anchorLat = 0.0
-    private var anchorLng = 0.0
-    private var anchorTime = 0L
-    private var hasAnchor = false
+    // Punto de referencia para medir quietud. Se mueve solo cuando de verdad avanzas.
+    private var refLat = 0.0
+    private var refLng = 0.0
+    private var refTime = 0L
+    private var hasRef = false
+
+    // Último punto crudo recibido (para filtrar saltos y micro-movimientos de la línea).
+    private var lastRawLat = 0.0
+    private var lastRawLng = 0.0
+    private var lastRawTime = 0L
+    private var hasRaw = false
 
     fun setContact(number: String) { _contact.value = number }
 
@@ -50,28 +56,24 @@ object RouteRepository {
     fun addPoint(lat: Double, lng: Double) {
         val now = System.currentTimeMillis()
 
-        // --- Filtro de calidad ---
-        val last = _points.value.lastOrNull()
-        if (last != null) {
-            val dist = distanceMeters(last.lat, last.lng, lat, lng)
-            val dtSec = (now - last.time) / 1000.0
-
-            // 1) Salto imposible: velocidad irreal = error GPS, descartar.
-            if (dtSec > 0 && dist / dtSec > MAX_SPEED_MPS) {
-                return
-            }
-            // 2) Micro-movimiento: si casi no se movió, no ensuciar la línea,
-            //    pero SÍ dejamos pasar para la lógica de "quieto" (no return aquí
-            //    si es el primer quieto). Para la línea, lo omitimos.
-            if (dist < MIN_MOVE_METERS) {
-                // Actualiza solo el tiempo del último punto para el reloj de quietud,
-                // sin agregar un punto nuevo casi idéntico.
-                evaluateStop(lat, lng, now)
-                return
+        // 1) Filtro de salto imposible (error GPS).
+        if (hasRaw) {
+            val d = distanceMeters(lastRawLat, lastRawLng, lat, lng)
+            val dt = (now - lastRawTime) / 1000.0
+            if (dt > 0 && d / dt > MAX_SPEED_MPS) {
+                return  // descarta punto basura
             }
         }
+        lastRawLat = lat; lastRawLng = lng; lastRawTime = now; hasRaw = true
 
-        _points.value = _points.value + Point(lat, lng, now)
+        // 2) Línea del mapa: solo agrega si hubo movimiento apreciable.
+        val lastDrawn = _points.value.lastOrNull()
+        if (lastDrawn == null ||
+            distanceMeters(lastDrawn.lat, lastDrawn.lng, lat, lng) >= MIN_MOVE_METERS) {
+            _points.value = _points.value + Point(lat, lng, now)
+        }
+
+        // 3) Lógica de quietud (independiente de la línea).
         evaluateStop(lat, lng, now)
     }
 
@@ -81,33 +83,33 @@ object RouteRepository {
             return
         }
 
-        if (!hasAnchor) {
-            setAnchor(lat, lng, now)
+        if (!hasRef) {
+            refLat = lat; refLng = lng; refTime = now; hasRef = true
             return
         }
 
-        val dist = distanceMeters(anchorLat, anchorLng, lat, lng)
-        if (dist > STOP_RADIUS_METERS) {
-            setAnchor(lat, lng, now)
-            _alertState.value = AlertState.NORMAL
+        val distFromRef = distanceMeters(refLat, refLng, lat, lng)
+
+        if (distFromRef > MOVE_THRESHOLD_METERS) {
+            // Se movió de verdad: nuevo punto de referencia, reinicia el reloj.
+            refLat = lat; refLng = lng; refTime = now
+            if (_alertState.value != AlertState.NORMAL) {
+                _alertState.value = AlertState.NORMAL
+            }
         } else {
-            if (now - anchorTime >= STOP_TIME_MS) {
+            // Sigue dentro del radio: ¿cuánto lleva quieto?
+            if (now - refTime >= STOP_TIME_MS) {
                 _alertState.value = AlertState.COUNTDOWN
             }
         }
     }
 
-    private fun setAnchor(lat: Double, lng: Double, time: Long) {
-        anchorLat = lat
-        anchorLng = lng
-        anchorTime = time
-        hasAnchor = true
-    }
-
     @Synchronized
     fun cancelAlert() {
         _alertState.value = AlertState.NORMAL
-        anchorTime = System.currentTimeMillis()
+        // Reinicia el reloj de quietud desde la posición actual.
+        refTime = System.currentTimeMillis()
+        if (hasRaw) { refLat = lastRawLat; refLng = lastRawLng }
     }
 
     @Synchronized
@@ -121,14 +123,16 @@ object RouteRepository {
         _points.value = emptyList()
         _tracking.value = true
         _alertState.value = AlertState.NORMAL
-        hasAnchor = false
+        hasRef = false
+        hasRaw = false
     }
 
     @Synchronized
     fun stop() {
         _tracking.value = false
         _alertState.value = AlertState.IDLE
-        hasAnchor = false
+        hasRef = false
+        hasRaw = false
     }
 
     private fun distanceMeters(
