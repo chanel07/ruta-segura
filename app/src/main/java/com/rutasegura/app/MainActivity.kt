@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var pendingStart = false
     private var countdownTimer: CountDownTimer? = null
     private var vibrator: Vibrator? = null
+    private var ringtone: Ringtone? = null
 
     private val COUNTDOWN_SECONDS = 30L
 
@@ -87,7 +89,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Enciende y desbloquea la pantalla para mostrar la alerta.
     private fun wakeScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -111,11 +112,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Pantalla inicial con contacto ----------
-
     private fun showIdle() {
         countdownTimer?.cancel()
-        stopVibration()
+        stopAlarmSignal()
         rootLayout.removeAllViews()
 
         addTitle("Ruta Segura")
@@ -143,11 +142,9 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(startBtn)
     }
 
-    // ---------- Recorrido normal ----------
-
     private fun showTracking() {
         countdownTimer?.cancel()
-        stopVibration()
+        stopAlarmSignal()
         rootLayout.removeAllViews()
 
         addTitle("En recorrido")
@@ -180,8 +177,6 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(stopBtn)
     }
 
-    // ---------- Cuenta regresiva con sonido y vibración ----------
-
     private fun showCountdown() {
         rootLayout.removeAllViews()
 
@@ -200,7 +195,7 @@ class MainActivity : ComponentActivity() {
         addSpacer(32)
 
         val okBtn = bigButton("ESTOY BIEN", "#1B5E20") {
-            stopVibration()
+            stopAlarmSignal()
             RouteRepository.cancelAlert()
         }
         rootLayout.addView(okBtn)
@@ -213,17 +208,15 @@ class MainActivity : ComponentActivity() {
                 counter.text = (msLeft / 1000).toString()
             }
             override fun onFinish() {
-                stopVibration()
+                stopAlarmSignal()
                 RouteRepository.triggerAlert()
             }
         }.start()
     }
 
-    // ---------- Alerta disparada: envío semi-automático ----------
-
     private fun showAlerted() {
         countdownTimer?.cancel()
-        stopVibration()
+        stopAlarmSignal()
         rootLayout.removeAllViews()
 
         addTitle("⚠ ALERTA")
@@ -273,8 +266,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------- Sonido + vibración ----------
-
     private fun startAlarmSignal() {
         try {
             val pattern = longArrayOf(0, 600, 400, 600, 400)
@@ -289,23 +280,28 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
+            // Detén cualquier sonido previo antes de arrancar uno nuevo.
+            ringtone?.stop()
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            val ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
+            ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
             ringtone?.play()
         } catch (e: Exception) {
             // sin sonido, ignorar
         }
     }
 
-    private fun stopVibration() {
+    private fun stopAlarmSignal() {
         try {
             vibrator?.cancel()
         } catch (e: Exception) {
             // ignorar
         }
+        try {
+            ringtone?.stop()
+        } catch (e: Exception) {
+            // ignorar
+        }
     }
-
-    // ---------- Permisos y servicio ----------
 
     private fun requestPermissionsAndStart() {
         val needed = mutableListOf(
@@ -336,8 +332,6 @@ class MainActivity : ComponentActivity() {
     private fun stopTracking() {
         stopService(Intent(this, TrackingService::class.java))
     }
-
-    // ---------- Utilidades UI ----------
 
     private fun addTitle(text: String) {
         val t = TextView(this).apply {
