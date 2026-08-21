@@ -42,6 +42,7 @@ class TrackingService : Service() {
     private var vibrator: Vibrator? = null
     private var ringtone: Ringtone? = null
     private var countdownTimer: CountDownTimer? = null
+    private var countingDown = false
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private val locationCallback = object : LocationCallback() {
@@ -59,21 +60,28 @@ class TrackingService : Service() {
         vibrator = getSystemService(Vibrator::class.java)
         startForegroundNotification("Ruta Segura activa", "Siguiendo tu recorrido...")
 
-        // El servicio escucha los cambios de estado y reacciona con la alarma.
         scope.launch {
             RouteRepository.alertState.collect { state ->
                 when (state) {
                     RouteRepository.AlertState.COUNTDOWN -> startCountdown()
-                    RouteRepository.AlertState.ALERTED -> { stopAlarm(); showAlertNotification() }
-                    RouteRepository.AlertState.NORMAL -> { stopAlarm(); countdownTimer?.cancel() }
-                    else -> { stopAlarm(); countdownTimer?.cancel() }
+                    RouteRepository.AlertState.ALERTED -> {
+                        countingDown = false
+                        stopAlarm(); showAlertNotification()
+                    }
+                    RouteRepository.AlertState.NORMAL -> {
+                        countingDown = false
+                        stopAlarm(); countdownTimer?.cancel()
+                    }
+                    else -> {
+                        countingDown = false
+                        stopAlarm(); countdownTimer?.cancel()
+                    }
                 }
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Botón "Estoy bien" desde la notificación.
         if (intent?.action == ACTION_IM_OK) {
             RouteRepository.cancelAlert()
             return START_STICKY
@@ -84,16 +92,22 @@ class TrackingService : Service() {
     }
 
     private fun startCountdown() {
+        if (countingDown) return
+        countingDown = true
         startAlarm()
+        RouteRepository.setCountdown(30)
         countdownTimer?.cancel()
         countdownTimer = object : CountDownTimer(30_000, 1000) {
             override fun onTick(msLeft: Long) {
+                val secs = (msLeft / 1000).toInt()
+                RouteRepository.setCountdown(secs)
                 startForegroundNotification(
                     "¿Estás bien?",
-                    "Alerta en ${msLeft / 1000}s. Toca para responder."
+                    "Alerta en ${secs}s. Toca para responder."
                 )
             }
             override fun onFinish() {
+                countingDown = false
                 stopAlarm()
                 RouteRepository.triggerAlert()
             }
@@ -155,7 +169,6 @@ class TrackingService : Service() {
         }
     }
 
-    // Notificación de alta prioridad que enciende la pantalla (tipo llamada).
     private fun showAlertNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -202,6 +215,7 @@ class TrackingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        countingDown = false
         stopAlarm()
         countdownTimer?.cancel()
         fusedClient.removeLocationUpdates(locationCallback)
