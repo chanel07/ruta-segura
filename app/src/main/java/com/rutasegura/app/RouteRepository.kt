@@ -18,6 +18,13 @@ object RouteRepository {
     private const val STOP_RADIUS_METERS = 30.0
     private const val STOP_TIME_MS = 5 * 60 * 1000L
 
+    // --- Filtro de calidad GPS ---
+    // Descarta saltos imposibles: si un punto implica velocidad mayor a esto,
+    // es un error del GPS, no un movimiento real (150 km/h caminando/moto = imposible).
+    private const val MAX_SPEED_MPS = 42.0   // ~150 km/h
+    // Ignora micro-movimientos menores a esto (ruido del GPS estando quieto).
+    private const val MIN_MOVE_METERS = 5.0
+
     private val _points = MutableStateFlow<List<Point>>(emptyList())
     val points: StateFlow<List<Point>> = _points
 
@@ -27,7 +34,6 @@ object RouteRepository {
     private val _alertState = MutableStateFlow(AlertState.IDLE)
     val alertState: StateFlow<AlertState> = _alertState
 
-    // Contacto de confianza (número en formato internacional, ej: 57300...).
     private val _contact = MutableStateFlow("")
     val contact: StateFlow<String> = _contact
 
@@ -36,17 +42,40 @@ object RouteRepository {
     private var anchorTime = 0L
     private var hasAnchor = false
 
-    fun setContact(number: String) {
-        _contact.value = number
-    }
+    fun setContact(number: String) { _contact.value = number }
 
     fun lastPoint(): Point? = _points.value.lastOrNull()
 
     @Synchronized
     fun addPoint(lat: Double, lng: Double) {
         val now = System.currentTimeMillis()
-        _points.value = _points.value + Point(lat, lng, now)
 
+        // --- Filtro de calidad ---
+        val last = _points.value.lastOrNull()
+        if (last != null) {
+            val dist = distanceMeters(last.lat, last.lng, lat, lng)
+            val dtSec = (now - last.time) / 1000.0
+
+            // 1) Salto imposible: velocidad irreal = error GPS, descartar.
+            if (dtSec > 0 && dist / dtSec > MAX_SPEED_MPS) {
+                return
+            }
+            // 2) Micro-movimiento: si casi no se movió, no ensuciar la línea,
+            //    pero SÍ dejamos pasar para la lógica de "quieto" (no return aquí
+            //    si es el primer quieto). Para la línea, lo omitimos.
+            if (dist < MIN_MOVE_METERS) {
+                // Actualiza solo el tiempo del último punto para el reloj de quietud,
+                // sin agregar un punto nuevo casi idéntico.
+                evaluateStop(lat, lng, now)
+                return
+            }
+        }
+
+        _points.value = _points.value + Point(lat, lng, now)
+        evaluateStop(lat, lng, now)
+    }
+
+    private fun evaluateStop(lat: Double, lng: Double, now: Long) {
         if (_alertState.value == AlertState.COUNTDOWN ||
             _alertState.value == AlertState.ALERTED) {
             return
@@ -82,14 +111,10 @@ object RouteRepository {
     }
 
     @Synchronized
-    fun triggerAlert() {
-        _alertState.value = AlertState.ALERTED
-    }
+    fun triggerAlert() { _alertState.value = AlertState.ALERTED }
 
     @Synchronized
-    fun manualSos() {
-        _alertState.value = AlertState.ALERTED
-    }
+    fun manualSos() { _alertState.value = AlertState.ALERTED }
 
     @Synchronized
     fun start() {
