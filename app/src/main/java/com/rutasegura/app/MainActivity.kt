@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
@@ -27,6 +28,16 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    // Paleta
+    private val COLOR_BG = Color.parseColor("#0D1B2A")        // azul muy oscuro (fondo)
+    private val COLOR_CARD = Color.parseColor("#1B263B")      // azul oscuro (tarjetas)
+    private val COLOR_PRIMARY = Color.parseColor("#2E5EAA")   // azul principal
+    private val COLOR_PRIMARY_D = Color.parseColor("#1B3A6B") // azul oscuro botón
+    private val COLOR_DANGER = Color.parseColor("#C1121F")    // rojo SOS/alerta
+    private val COLOR_SUCCESS = Color.parseColor("#2A9D8F")   // verde "estoy bien"
+    private val COLOR_TEXT = Color.parseColor("#E0E6ED")      // texto claro
+    private val COLOR_TEXT_DIM = Color.parseColor("#9DB2CE")  // texto tenue
 
     private lateinit var rootLayout: LinearLayout
     private var pendingStart = false
@@ -54,7 +65,8 @@ class MainActivity : ComponentActivity() {
         rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(48, 60, 48, 48)
+            setPadding(56, 72, 56, 56)
+            setBackgroundColor(COLOR_BG)
         }
         setContentView(rootLayout)
         observeState()
@@ -71,20 +83,16 @@ class MainActivity : ComponentActivity() {
     private fun render(state: RouteRepository.AlertState) {
         when (state) {
             RouteRepository.AlertState.IDLE -> {
-                clearScreenFlags()
-                showIdle()
+                clearScreenFlags(); showIdle()
             }
             RouteRepository.AlertState.NORMAL -> {
-                clearScreenFlags()
-                showTracking()
+                clearScreenFlags(); showTracking()
             }
             RouteRepository.AlertState.COUNTDOWN -> {
-                wakeScreen()
-                showCountdown()
+                wakeScreen(); showCountdown()
             }
             RouteRepository.AlertState.ALERTED -> {
-                wakeScreen()
-                showAlerted()
+                wakeScreen(); showAlerted()
             }
         }
     }
@@ -112,25 +120,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ---------- Pantalla inicial ----------
+
     private fun showIdle() {
         countdownTimer?.cancel()
         stopAlarmSignal()
         rootLayout.removeAllViews()
 
+        addLogo()
         addTitle("Ruta Segura")
-        addText("Guarda el número de tu contacto de confianza (con código de país, ej: 57300...).", 15f)
-        addSpacer(16)
+        addText("Tu acompañante en el camino", 15f, COLOR_TEXT_DIM)
+        addSpacer(48)
+
+        addText("Contacto de confianza", 14f, COLOR_TEXT_DIM)
+        addSpacer(8)
 
         val contactField = EditText(this).apply {
             hint = "Ej: 573001234567"
             setText(RouteRepository.contact.value)
             textSize = 18f
             gravity = Gravity.CENTER
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_TEXT_DIM)
+            background = roundedBg(COLOR_CARD, 24)
+            setPadding(32, 32, 32, 32)
         }
-        rootLayout.addView(contactField)
-        addSpacer(32)
+        rootLayout.addView(contactField, fullWidth())
+        addSpacer(40)
 
-        val startBtn = bigButton("INICIAR RECORRIDO", "#1B5E20") {
+        val startBtn = styledButton("INICIAR RECORRIDO", COLOR_PRIMARY) {
             val number = contactField.text.toString().trim()
             if (number.length < 10) {
                 Toast.makeText(this, "Escribe un número válido con código de país", Toast.LENGTH_LONG).show()
@@ -142,59 +160,66 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(startBtn)
     }
 
+    // ---------- Recorrido normal ----------
+
     private fun showTracking() {
         countdownTimer?.cancel()
         stopAlarmSignal()
         rootLayout.removeAllViews()
 
+        addStatusDot(COLOR_SUCCESS)
         addTitle("En recorrido")
-        addText("La app está vigilando tu trayecto.", 16f)
+        addText("La app está cuidando tu trayecto", 15f, COLOR_TEXT_DIM)
+        addSpacer(16)
 
         val pointsView = TextView(this).apply {
-            textSize = 15f
+            textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 0)
+            setTextColor(COLOR_TEXT_DIM)
         }
         rootLayout.addView(pointsView)
         lifecycleScope.launch {
             RouteRepository.points.collect { pts ->
-                pointsView.text = "Puntos registrados: ${pts.size}"
+                pointsView.text = "Ubicaciones registradas: ${pts.size}"
             }
         }
 
-        addSpacer(48)
+        addSpacer(56)
 
-        val sosBtn = bigButton("SOS — PEDIR AYUDA", "#B00020") {
+        val sosBtn = styledButton("SOS — PEDIR AYUDA", COLOR_DANGER) {
             RouteRepository.manualSos()
         }
         rootLayout.addView(sosBtn)
 
         addSpacer(20)
 
-        val stopBtn = smallButton("Detener recorrido") {
+        val stopBtn = ghostButton("Detener recorrido") {
             stopTracking()
         }
         rootLayout.addView(stopBtn)
     }
 
+    // ---------- Cuenta regresiva ----------
+
     private fun showCountdown() {
         rootLayout.removeAllViews()
 
         addTitle("¿Estás bien?")
-        addText("Detectamos que llevas rato sin moverte.", 16f)
-        addSpacer(24)
-
-        val counter = TextView(this).apply {
-            textSize = 60f
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#B00020"))
-        }
-        rootLayout.addView(counter)
-
-        addText("Si no respondes, se enviará una alerta.", 15f)
+        addText("Llevas un rato sin moverte", 16f, COLOR_TEXT_DIM)
         addSpacer(32)
 
-        val okBtn = bigButton("ESTOY BIEN", "#1B5E20") {
+        val counter = TextView(this).apply {
+            textSize = 72f
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_DANGER)
+        }
+        rootLayout.addView(counter)
+        addSpacer(8)
+
+        addText("Si no respondes, se enviará una alerta", 14f, COLOR_TEXT_DIM)
+        addSpacer(40)
+
+        val okBtn = styledButton("ESTOY BIEN", COLOR_SUCCESS) {
             stopAlarmSignal()
             RouteRepository.cancelAlert()
         }
@@ -214,33 +239,54 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
 
+    // ---------- Alerta ----------
+
     private fun showAlerted() {
         countdownTimer?.cancel()
         stopAlarmSignal()
         rootLayout.removeAllViews()
 
-        addTitle("⚠ ALERTA")
-        addText("Se activó una alerta de emergencia.\nEnvía tu ubicación a tu contacto.", 16f)
-        addSpacer(32)
+        addText("⚠", 56f, COLOR_DANGER)
+        addTitle("Alerta activada")
+        addText("Avisa a tu contacto de confianza", 15f, COLOR_TEXT_DIM)
+        addSpacer(40)
 
-        val sendBtn = bigButton("ENVIAR ALERTA POR WHATSAPP", "#B00020") {
+        val callBtn = styledButton("LLAMAR AL CONTACTO", COLOR_DANGER) {
+            callContact()
+        }
+        rootLayout.addView(callBtn)
+        addSpacer(16)
+
+        val sendBtn = styledButton("ENVIAR UBICACIÓN", COLOR_PRIMARY) {
             sendWhatsAppAlert()
         }
         rootLayout.addView(sendBtn)
+        addSpacer(24)
 
-        addSpacer(20)
-
-        val backBtn = smallButton("Estoy bien, volver al recorrido") {
+        val backBtn = ghostButton("Estoy bien, volver") {
             RouteRepository.cancelAlert()
         }
         rootLayout.addView(backBtn)
+        addSpacer(8)
 
-        addSpacer(12)
-
-        val stopBtn = smallButton("Detener recorrido") {
+        val stopBtn = ghostButton("Detener recorrido") {
             stopTracking()
         }
         rootLayout.addView(stopBtn)
+    }
+
+    private fun callContact() {
+        val number = RouteRepository.contact.value
+        if (number.isBlank()) {
+            Toast.makeText(this, "No hay contacto guardado", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "No se pudo abrir el marcador", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun sendWhatsAppAlert() {
@@ -259,12 +305,13 @@ class MainActivity : ComponentActivity() {
         val url = "https://wa.me/$number?text=${Uri.encode(message)}"
 
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
             Toast.makeText(this, "No se pudo abrir WhatsApp", Toast.LENGTH_LONG).show()
         }
     }
+
+    // ---------- Sonido + vibración ----------
 
     private fun startAlarmSignal() {
         try {
@@ -275,33 +322,22 @@ class MainActivity : ComponentActivity() {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(pattern, 0)
             }
-        } catch (e: Exception) {
-            // sin vibrador, ignorar
-        }
+        } catch (e: Exception) { }
 
         try {
-            // Detén cualquier sonido previo antes de arrancar uno nuevo.
             ringtone?.stop()
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
             ringtone?.play()
-        } catch (e: Exception) {
-            // sin sonido, ignorar
-        }
+        } catch (e: Exception) { }
     }
 
     private fun stopAlarmSignal() {
-        try {
-            vibrator?.cancel()
-        } catch (e: Exception) {
-            // ignorar
-        }
-        try {
-            ringtone?.stop()
-        } catch (e: Exception) {
-            // ignorar
-        }
+        try { vibrator?.cancel() } catch (e: Exception) { }
+        try { ringtone?.stop() } catch (e: Exception) { }
     }
+
+    // ---------- Permisos y servicio ----------
 
     private fun requestPermissionsAndStart() {
         val needed = mutableListOf(
@@ -311,11 +347,9 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-
         val missing = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
         if (missing.isEmpty()) {
             startTracking()
         } else {
@@ -325,31 +359,55 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTracking() {
-        val intent = Intent(this, TrackingService::class.java)
-        ContextCompat.startForegroundService(this, intent)
+        ContextCompat.startForegroundService(this, Intent(this, TrackingService::class.java))
     }
 
     private fun stopTracking() {
         stopService(Intent(this, TrackingService::class.java))
     }
 
+    // ---------- Componentes UI ----------
+
+    private fun addLogo() {
+        val logo = TextView(this).apply {
+            text = "🛡"
+            textSize = 56f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 8)
+        }
+        rootLayout.addView(logo)
+    }
+
     private fun addTitle(text: String) {
         val t = TextView(this).apply {
             this.text = text
-            textSize = 30f
+            textSize = 32f
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 20)
+            setTextColor(COLOR_TEXT)
+            setPadding(0, 0, 0, 8)
         }
         rootLayout.addView(t)
     }
 
-    private fun addText(text: String, size: Float) {
+    private fun addText(text: String, size: Float, color: Int) {
         val t = TextView(this).apply {
             this.text = text
             textSize = size
             gravity = Gravity.CENTER
+            setTextColor(color)
         }
         rootLayout.addView(t)
+    }
+
+    private fun addStatusDot(color: Int) {
+        val dot = TextView(this).apply {
+            text = "●"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(color)
+            setPadding(0, 0, 0, 8)
+        }
+        rootLayout.addView(dot)
     }
 
     private fun addSpacer(height: Int) {
@@ -360,24 +418,45 @@ class MainActivity : ComponentActivity() {
         rootLayout.addView(s)
     }
 
-    private fun bigButton(label: String, colorHex: String, onClick: () -> Unit): Button {
+    private fun fullWidth(): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+    }
+
+    private fun roundedBg(color: Int, radius: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius.toFloat()
+        }
+    }
+
+    private fun styledButton(label: String, color: Int, onClick: () -> Unit): Button {
         val b = Button(this).apply {
             text = label
-            textSize = 20f
+            textSize = 18f
+            isAllCaps = false
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor(colorHex))
+            background = roundedBg(color, 32)
+            stateListAnimator = null
             setOnClickListener { onClick() }
         }
-        b.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 200
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 170
         )
+        params.setMargins(0, 0, 0, 0)
+        b.layoutParams = params
         return b
     }
 
-    private fun smallButton(label: String, onClick: () -> Unit): Button {
+    private fun ghostButton(label: String, onClick: () -> Unit): Button {
         val b = Button(this).apply {
             text = label
             textSize = 15f
+            isAllCaps = false
+            setTextColor(COLOR_TEXT_DIM)
+            background = null
             setOnClickListener { onClick() }
         }
         return b
