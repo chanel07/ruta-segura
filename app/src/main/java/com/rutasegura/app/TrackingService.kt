@@ -174,7 +174,11 @@ class TrackingService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ALERT, "Alerta Ruta Segura",
                 NotificationManager.IMPORTANCE_HIGH
-            )
+            ).apply {
+                description = "Alertas de emergencia"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 300, 500)
+            }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
@@ -188,12 +192,13 @@ class TrackingService : Service() {
 
         val notif = Notification.Builder(this, CHANNEL_ALERT)
             .setContentTitle("⚠ Alerta activada")
-            .setContentText("Toca para avisar a tu contacto")
+            .setContentText("Toca para avisar a tu contacto de confianza")
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setPriority(Notification.PRIORITY_HIGH)
+            .setPriority(Notification.PRIORITY_MAX)
             .setCategory(Notification.CATEGORY_CALL)
             .setFullScreenIntent(fullScreenPending, true)
-            .setAutoCancel(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
             .build()
 
         getSystemService(NotificationManager::class.java).notify(202, notif)
