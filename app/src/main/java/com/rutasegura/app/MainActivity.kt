@@ -316,6 +316,9 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AlertedScreen() {
+        LaunchedEffect(Unit) {
+            sendWhatsAppAlert()
+        }
         Column(
             modifier = Modifier.fillMaxSize()
                 .background(Brush.verticalGradient(listOf(BG, Color(0xFF2A0A12))))
@@ -336,7 +339,7 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.height(20.dp))
             Text("Alerta activada", color = TEXT, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text("Avisa a tu contacto de confianza", color = TEXT_DIM, fontSize = 15.sp)
+            Text("Se abrió WhatsApp con tu ubicación", color = TEXT_DIM, fontSize = 15.sp)
             Spacer(Modifier.height(44.dp))
 
             GradientButton(
@@ -345,7 +348,7 @@ class MainActivity : ComponentActivity() {
             ) { callContact() }
             Spacer(Modifier.height(14.dp))
             GradientButton(
-                "Enviar ubicación", Icons.Rounded.Send,
+                "Reenviar ubicación", Icons.Rounded.Send,
                 listOf(ACCENT, ACCENT_GLOW)
             ) { sendWhatsAppAlert() }
             Spacer(Modifier.height(24.dp))
@@ -426,7 +429,7 @@ class MainActivity : ComponentActivity() {
                 Intent(
                     Intent.ACTION_VIEW,
                     Uri.parse("https://wa.me/$number?text=${Uri.encode(msg)}")
-                )
+                ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
             )
         } catch (e: Exception) { }
     }
